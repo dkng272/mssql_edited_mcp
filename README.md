@@ -1,8 +1,28 @@
-# SQL-AI-samples
+# SQL-AI-samples (Modified Fork)
 
-## About this repo
+## About this fork
 
-This repo hosts samples meant to help design [AI applications built on data from an Azure SQL Database](https://aka.ms/sql-ai). We illustrate key technical concepts and demonstrate workflows that integrate Azure SQL data with other popular AI application components inside and outside of Azure.
+This is a modified fork of the [Azure-Samples/SQL-AI-samples](https://github.com/Azure-Samples/SQL-AI-samples) repository with custom enhancements.
+
+### Enhancements Added
+
+**MSSQL MCP Server - Node.js Edition**
+- **ExportDataTool**: New functionality to export SQL query results directly to CSV files
+  - Executes SELECT queries and writes results to specified file paths
+  - More efficient than read_data for large datasets
+  - Includes optional header configuration
+  - Available in both readonly and full access modes (safe read-only operation)
+  - See: `MssqlMcp/Node/src/tools/ExportDataTool.ts`
+
+- **Schema-based Table Access Control**: Enhanced ListTableTool with schema filtering
+  - Filter and list tables from specific database schemas
+  - Allows restricting access to specific schemas for better security and organization
+  - Supports multiple schema filtering in a single query
+  - See: `MssqlMcp/Node/src/tools/ListTableTool.ts`
+
+### Original Repository
+
+The original repository hosts samples meant to help design [AI applications built on data from an Azure SQL Database](https://aka.ms/sql-ai). It illustrates key technical concepts and demonstrates workflows that integrate Azure SQL data with other popular AI application components inside and outside of Azure.
 
 - [AI Features Samples](#ai-features-samples)
     - [Azure SQL + Azure Cognitive Services](#azure-sql--azure-cognitive-services)
