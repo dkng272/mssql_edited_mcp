@@ -18,12 +18,11 @@ import { CreateTableTool } from "./tools/CreateTableTool.js";
 import { CreateIndexTool } from "./tools/CreateIndexTool.js";
 import { ListTableTool } from "./tools/ListTableTool.js";
 import { DropTableTool } from "./tools/DropTableTool.js";
-import { DefaultAzureCredential, InteractiveBrowserCredential } from "@azure/identity";
+import { AzureCliCredential } from "@azure/identity";
 import { DescribeTableTool } from "./tools/DescribeTableTool.js";
 import { ExportDataTool } from "./tools/ExportDataTool.js";
 
 // MSSQL Database connection configuration
-// const credential = new DefaultAzureCredential();
 
 // Globals for connection and token reuse
 let globalSqlPool: sql.ConnectionPool | null = null;
@@ -32,10 +31,7 @@ let globalTokenExpiresOn: Date | null = null;
 
 // Function to create SQL config with fresh access token, returns token and expiry
 export async function createSqlConfig(): Promise<{ config: sql.config, token: string, expiresOn: Date }> {
-  const credential = new InteractiveBrowserCredential({
-    redirectUri: 'http://localhost'
-    // disableAutomaticAuthentication : true
-  });
+  const credential = new AzureCliCredential();
   const accessToken = await credential.getToken('https://database.windows.net/.default');
 
   const trustServerCertificate = process.env.TRUST_SERVER_CERTIFICATE?.toLowerCase() === 'true';
