@@ -4,14 +4,14 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 export class ReadDataTool implements Tool {
   [key: string]: any;
   name = "read_data";
-  description = "Executes a SELECT query on an MSSQL Database table. The query must start with SELECT and cannot contain any destructive SQL operations for security reasons.";
+  description = "Executes a SELECT query on an MSSQL Database table. The query must start with SELECT or WITH (for CTEs) and cannot contain any destructive SQL operations for security reasons.";
   
   inputSchema = {
     type: "object",
     properties: {
       query: { 
         type: "string", 
-        description: "SQL SELECT query to execute (must start with SELECT and cannot contain destructive operations). Example: SELECT * FROM movies WHERE genre = 'comedy'" 
+        description: "SQL SELECT query to execute (must start with SELECT or WITH for CTEs, and cannot contain destructive operations). Example: SELECT * FROM movies WHERE genre = 'comedy'" 
       },
     },
     required: ["query"],
@@ -106,11 +106,11 @@ export class ReadDataTool implements Tool {
 
     const upperQuery = cleanQuery.toUpperCase();
 
-    // Must start with SELECT
-    if (!upperQuery.startsWith('SELECT')) {
-      return { 
-        isValid: false, 
-        error: 'Query must start with SELECT for security reasons' 
+    // Must start with SELECT or WITH (for CTEs)
+    if (!upperQuery.startsWith('SELECT') && !upperQuery.startsWith('WITH')) {
+      return {
+        isValid: false,
+        error: 'Query must start with SELECT or WITH for security reasons'
       };
     }
 
