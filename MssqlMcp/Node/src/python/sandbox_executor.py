@@ -82,6 +82,44 @@ def make_json_serializable(obj):
     return obj
 
 
+def create_safe_import():
+    """Create a restricted __import__ that only allows safe packages."""
+    # Store references to allowed modules
+    safe_modules = {
+        'pandas': pd,
+        'numpy': np,
+        'scipy': scipy,
+        'sklearn': None,  # Will be handled specially
+    }
+
+    def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+        """Restricted import that only allows whitelisted packages."""
+        # Split module name (e.g., 'scipy.stats' -> 'scipy')
+        base_module = name.split('.')[0]
+
+        if base_module in safe_modules:
+            module = safe_modules[base_module]
+            if module is None:
+                # sklearn is special - return object with submodules
+                class SklearnModule:
+                    preprocessing = preprocessing
+                    cluster = cluster
+                    decomposition = decomposition
+                    metrics = metrics
+                return SklearnModule()
+            return module
+        else:
+            # Provide helpful error for non-whitelisted imports
+            available = ', '.join(safe_modules.keys())
+            raise ModuleNotFoundError(
+                f"Module '{name}' is not available in this sandbox.\n"
+                f"Available packages: {available}\n"
+                f"Tip: These packages are also pre-imported as: pd (pandas), np (numpy), scipy, sklearn"
+            )
+
+    return safe_import
+
+
 def execute_code(code: str, query_data: dict, is_dry_run: bool) -> dict:
     """Execute Python code in restricted namespace."""
     global _query_results, _sql_queries, _is_dry_run
@@ -173,6 +211,9 @@ def execute_code(code: str, query_data: dict, is_dry_run: bool) -> dict:
             'TypeError': TypeError,
             'KeyError': KeyError,
             'IndexError': IndexError,
+
+            # Custom import function (allows safe packages only)
+            '__import__': create_safe_import(),
         }
     }
 
@@ -213,6 +254,41 @@ def execute_code(code: str, query_data: dict, is_dry_run: bool) -> dict:
             'success': False,
             'error': f"KeyError: {str(e)}",
             'available_columns': available_columns if available_columns else None,
+            'stdout': stdout_capture.getvalue()[:5000],
+            'stderr': stderr_capture.getvalue()[:5000],
+            'queries_executed': _sql_queries.copy()
+        }
+    except ModuleNotFoundError as e:
+        # Handle import errors for unavailable packages
+        line_number = None
+        import traceback
+        tb = traceback.extract_tb(e.__traceback__)
+        if tb:
+            line_number = tb[-1].lineno
+
+        return {
+            'success': False,
+            'error': f"ModuleNotFoundError: {str(e)}",
+            'hint': "This package is not available in the sandbox. Available: pandas, numpy, scipy, sklearn (already pre-imported as pd, np, scipy, sklearn)",
+            'line_number': line_number,
+            'available_packages': ['pandas', 'numpy', 'scipy', 'sklearn'],
+            'stdout': stdout_capture.getvalue()[:5000],
+            'stderr': stderr_capture.getvalue()[:5000],
+            'queries_executed': _sql_queries.copy()
+        }
+    except ImportError as e:
+        # Handle other import-related errors
+        line_number = None
+        import traceback
+        tb = traceback.extract_tb(e.__traceback__)
+        if tb:
+            line_number = tb[-1].lineno
+
+        return {
+            'success': False,
+            'error': f"ImportError: {str(e)}",
+            'hint': "This import is not allowed. Available packages: pandas, numpy, scipy, sklearn (already pre-imported as pd, np, scipy, sklearn)",
+            'line_number': line_number,
             'stdout': stdout_capture.getvalue()[:5000],
             'stderr': stderr_capture.getvalue()[:5000],
             'queries_executed': _sql_queries.copy()
