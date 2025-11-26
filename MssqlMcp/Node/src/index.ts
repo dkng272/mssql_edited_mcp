@@ -18,44 +18,195 @@ import { CreateTableTool } from "./tools/CreateTableTool.js";
 import { CreateIndexTool } from "./tools/CreateIndexTool.js";
 import { ListTableTool } from "./tools/ListTableTool.js";
 import { DropTableTool } from "./tools/DropTableTool.js";
-import { AzureCliCredential } from "@azure/identity";
+import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
 import { DescribeTableTool } from "./tools/DescribeTableTool.js";
 import { ExportDataTool } from "./tools/ExportDataTool.js";
 import { ExecutePythonTool } from "./tools/ExecutePythonTool.js";
 
 // MSSQL Database connection configuration
 
+// Type for authentication result
+type AuthResult = {
+  type: 'azure-ad' | 'sql-auth';
+  config: sql.config;
+  token: string | null;
+  expiresOn: Date | null;
+};
+
 // Globals for connection and token reuse
 let globalSqlPool: sql.ConnectionPool | null = null;
 let globalAccessToken: string | null = null;
 let globalTokenExpiresOn: Date | null = null;
+let globalAuthType: 'azure-ad' | 'sql-auth' | null = null;
 
-// Function to create SQL config with fresh access token, returns token and expiry
-export async function createSqlConfig(): Promise<{ config: sql.config, token: string, expiresOn: Date }> {
-  const credential = new AzureCliCredential();
-  const accessToken = await credential.getToken('https://database.windows.net/.default');
+// Helper functions for configuration
+function getTrustCertificate(): boolean {
+  return process.env.TRUST_SERVER_CERTIFICATE?.toLowerCase() === 'true';
+}
 
-  const trustServerCertificate = process.env.TRUST_SERVER_CERTIFICATE?.toLowerCase() === 'true';
-  const connectionTimeout = process.env.CONNECTION_TIMEOUT ? parseInt(process.env.CONNECTION_TIMEOUT, 10) : 30;
+function getConnectionTimeout(): number {
+  const timeout = process.env.CONNECTION_TIMEOUT ? parseInt(process.env.CONNECTION_TIMEOUT, 10) : 30;
+  return timeout * 1000; // convert seconds to milliseconds
+}
+
+// Authentication helper functions
+async function tryAzureCliAuth(): Promise<AuthResult | null> {
+  try {
+    const credential = new AzureCliCredential();
+    const accessToken = await credential.getToken('https://database.windows.net/.default');
+    return {
+      type: 'azure-ad',
+      config: {
+        server: process.env.SERVER_NAME!,
+        database: process.env.DATABASE_NAME!,
+        options: {
+          encrypt: true,
+          trustServerCertificate: getTrustCertificate()
+        },
+        authentication: {
+          type: 'azure-active-directory-access-token',
+          options: {
+            token: accessToken?.token!,
+          },
+        },
+        connectionTimeout: getConnectionTimeout()
+      },
+      token: accessToken?.token!,
+      expiresOn: accessToken?.expiresOnTimestamp ? new Date(accessToken.expiresOnTimestamp) : new Date(Date.now() + 30 * 60 * 1000)
+    };
+  } catch (error: any) {
+    console.error('[Auth] Azure CLI failed:', error.message);
+    return null;
+  }
+}
+
+async function trySqlAuth(): Promise<AuthResult | null> {
+  const username = process.env.SQL_USERNAME;
+  const password = process.env.SQL_PASSWORD;
+
+  if (!username || !password) {
+    console.error('[Auth] SQL auth skipped: SQL_USERNAME and SQL_PASSWORD not provided');
+    return null;
+  }
+
+  try {
+    return {
+      type: 'sql-auth',
+      config: {
+        server: process.env.SERVER_NAME!,
+        database: process.env.DATABASE_NAME!,
+        user: username,
+        password: password,
+        options: {
+          encrypt: true,
+          trustServerCertificate: getTrustCertificate()
+        },
+        connectionTimeout: getConnectionTimeout()
+      },
+      token: null,
+      expiresOn: null
+    };
+  } catch (error: any) {
+    console.error('[Auth] SQL auth failed:', error.message);
+    return null;
+  }
+}
+
+async function tryInteractiveBrowserAuth(): Promise<AuthResult | null> {
+  try {
+    const credential = new InteractiveBrowserCredential({});
+    const accessToken = await credential.getToken('https://database.windows.net/.default');
+    return {
+      type: 'azure-ad',
+      config: {
+        server: process.env.SERVER_NAME!,
+        database: process.env.DATABASE_NAME!,
+        options: {
+          encrypt: true,
+          trustServerCertificate: getTrustCertificate()
+        },
+        authentication: {
+          type: 'azure-active-directory-access-token',
+          options: {
+            token: accessToken?.token!,
+          },
+        },
+        connectionTimeout: getConnectionTimeout()
+      },
+      token: accessToken?.token!,
+      expiresOn: accessToken?.expiresOnTimestamp ? new Date(accessToken.expiresOnTimestamp) : new Date(Date.now() + 30 * 60 * 1000)
+    };
+  } catch (error: any) {
+    console.error('[Auth] Interactive browser failed:', error.message);
+    return null;
+  }
+}
+
+async function tryAuthenticationChain(): Promise<AuthResult> {
+  // Try Azure CLI
+  console.error('[Auth] Trying Azure CLI authentication...');
+  let result = await tryAzureCliAuth();
+  if (result) {
+    console.error('[Auth] ✓ Azure CLI authentication successful');
+    return result;
+  }
+
+  // Try SQL Auth
+  console.error('[Auth] Trying SQL authentication...');
+  result = await trySqlAuth();
+  if (result) {
+    console.error('[Auth] ✓ SQL authentication successful');
+    return result;
+  }
+
+  // Try Interactive Browser (last resort)
+  console.error('[Auth] Trying interactive browser authentication...');
+  result = await tryInteractiveBrowserAuth();
+  if (result) {
+    console.error('[Auth] ✓ Interactive browser authentication successful');
+    return result;
+  }
+
+  throw new Error('All authentication methods failed. Please provide either:\n  - Azure CLI login (run \'az login\')\n  - SQL credentials via SQL_USERNAME and SQL_PASSWORD environment variables');
+}
+
+async function authenticateWith(method: string): Promise<AuthResult> {
+  switch (method) {
+    case 'azure-cli':
+      const azureResult = await tryAzureCliAuth();
+      if (azureResult) return azureResult;
+      throw new Error('Azure CLI authentication failed');
+
+    case 'sql-auth':
+      const sqlResult = await trySqlAuth();
+      if (sqlResult) return sqlResult;
+      throw new Error('SQL authentication failed');
+
+    case 'interactive':
+      const interactiveResult = await tryInteractiveBrowserAuth();
+      if (interactiveResult) return interactiveResult;
+      throw new Error('Interactive browser authentication failed');
+
+    default:
+      throw new Error(`Unknown authentication method: ${method}`);
+  }
+}
+
+// Function to create SQL config with authentication fallback
+export async function createSqlConfig(): Promise<{ config: sql.config, token: string | null, expiresOn: Date | null }> {
+  const authMethod = process.env.AUTH_METHOD || 'auto';
+
+  let result: AuthResult;
+  if (authMethod === 'auto') {
+    result = await tryAuthenticationChain();
+  } else {
+    result = await authenticateWith(authMethod);
+  }
 
   return {
-    config: {
-      server: process.env.SERVER_NAME!,
-      database: process.env.DATABASE_NAME!,
-      options: {
-        encrypt: true,
-        trustServerCertificate
-      },
-      authentication: {
-        type: 'azure-active-directory-access-token',
-        options: {
-          token: accessToken?.token!,
-        },
-      },
-      connectionTimeout: connectionTimeout * 1000, // convert seconds to milliseconds
-    },
-    token: accessToken?.token!,
-    expiresOn: accessToken?.expiresOnTimestamp ? new Date(accessToken.expiresOnTimestamp) : new Date(Date.now() + 30 * 60 * 1000)
+    config: result.config,
+    token: result.token,
+    expiresOn: result.expiresOn
   };
 }
 
@@ -170,21 +321,31 @@ runServer().catch((error) => {
 // Connect to SQL only when handling a request
 
 async function ensureSqlConnection() {
-  // If we have a pool and it's connected, and the token is still valid, reuse it
-  if (
-    globalSqlPool &&
-    globalSqlPool.connected &&
-    globalAccessToken &&
-    globalTokenExpiresOn &&
-    globalTokenExpiresOn > new Date(Date.now() + 2 * 60 * 1000) // 2 min buffer
-  ) {
-    return;
+  // If using SQL auth, tokens don't expire - just check if pool is connected
+  if (globalAuthType === 'sql-auth') {
+    if (globalSqlPool && globalSqlPool.connected) {
+      return; // SQL auth doesn't have token expiration
+    }
+  } else {
+    // Azure AD token expiration check
+    if (
+      globalSqlPool &&
+      globalSqlPool.connected &&
+      globalAccessToken &&
+      globalTokenExpiresOn &&
+      globalTokenExpiresOn > new Date(Date.now() + 2 * 60 * 1000) // 2 min buffer
+    ) {
+      return;
+    }
   }
 
-  // Otherwise, get a new token and reconnect
+  // Otherwise, get a new config and reconnect
   const { config, token, expiresOn } = await createSqlConfig();
   globalAccessToken = token;
   globalTokenExpiresOn = expiresOn;
+
+  // Determine auth type from the result
+  globalAuthType = token ? 'azure-ad' : 'sql-auth';
 
   // Close old pool if exists
   if (globalSqlPool && globalSqlPool.connected) {

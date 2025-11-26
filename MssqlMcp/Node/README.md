@@ -218,21 +218,128 @@ pip install pandas numpy scipy scikit-learn
 3. **Restart Claude Desktop**
    - Close and reopen Claude Desktop for the changes to take effect
 
+## Authentication Methods
+
+The MCP server supports three authentication methods with automatic fallback:
+
+### 1. Azure CLI Authentication (Recommended for Azure AD users)
+- **Setup**: Run `az login` in your terminal
+- **Pros**: Silent authentication, no credentials in config
+- **Use case**: Azure AD users with database access approval
+
+### 2. SQL Authentication (Traditional)
+- **Setup**: Add `SQL_USERNAME` and `SQL_PASSWORD` to environment variables
+- **Pros**: Works for users with SQL credentials, no Azure CLI required
+- **Use case**: Users with traditional SQL login credentials
+
+### 3. Interactive Browser (Fallback)
+- **Setup**: Opens browser for Azure AD login
+- **Pros**: Works when Azure CLI is not configured
+- **Use case**: Azure AD users without CLI setup
+
+### Automatic Fallback Behavior
+
+By default (`AUTH_METHOD="auto"`), the server tries authentication methods in this order:
+```
+1. Azure CLI (silent)
+   ↓ (if fails)
+2. SQL Authentication
+   ↓ (if fails)
+3. Interactive Browser
+```
+
+You can force a specific method with `AUTH_METHOD` env var.
+
 ### Configuration Parameters
 
+**Connection:**
 - **SERVER_NAME**: Your MSSQL Database server name (e.g., `my-server.database.windows.net`)
 - **DATABASE_NAME**: Your database name
-- **READONLY**: Set to `"true"` to restrict to read-only operations, `"false"` for full access
 - **Path**: Update the path in `args` to point to your actual project location.
+
+**Authentication:**
+- **SQL_USERNAME**: (Optional) SQL authentication username. Required for SQL authentication.
+- **SQL_PASSWORD**: (Optional) SQL authentication password. Required for SQL authentication.
+- **AUTH_METHOD**: (Optional) Force specific authentication method. Options: `"azure-cli"`, `"sql-auth"`, `"interactive"`, `"auto"` (default). When set to `"auto"`, tries Azure CLI → SQL Auth → Interactive Browser in order.
+
+**Security & Performance:**
+- **READONLY**: Set to `"true"` to restrict to read-only operations, `"false"` for full access
 - **CONNECTION_TIMEOUT**: (Optional) Connection timeout in seconds. Defaults to `30` if not set.
 - **TRUST_SERVER_CERTIFICATE**: (Optional) Set to `"true"` to trust self-signed server certificates (useful for development or when connecting to servers with self-signed certs). Defaults to `"false"`.
 - **PYTHON_PATH**: (Required for execute_python) Full path to Python interpreter with required packages installed. Claude Desktop and VS Code may use different Python environments than your terminal, so specify the exact path (e.g., `/opt/anaconda3/bin/python3`, `C:/Python311/python.exe`).
 
-## Sample Configurations
+## Configuration Examples
 
-You can find sample configuration files in the `src/samples/` folder:
-- `claude_desktop_config.json` - For Claude Desktop
-- `vscode_agent_config.json` - For VS Code Agent
+### Example 1: Azure AD User (Azure CLI)
+
+For users with Azure AD access (existing behavior):
+
+```json
+{
+  "mcpServers": {
+    "mssql": {
+      "command": "node",
+      "args": ["C:/path/to/your/Node/dist/index.js"],
+      "env": {
+        "SERVER_NAME": "my-server.database.windows.net",
+        "DATABASE_NAME": "mydb",
+        "READONLY": "false",
+        "PYTHON_PATH": "/opt/anaconda3/bin/python3"
+      }
+    }
+  }
+}
+```
+
+**Setup**: Run `az login` before starting Claude Desktop.
+
+### Example 2: SQL Authentication User
+
+For users with traditional SQL credentials:
+
+```json
+{
+  "mcpServers": {
+    "mssql": {
+      "command": "node",
+      "args": ["C:/path/to/your/Node/dist/index.js"],
+      "env": {
+        "SERVER_NAME": "sqls-dclab.database.windows.net",
+        "DATABASE_NAME": "dclab",
+        "SQL_USERNAME": "dclab_readonly",
+        "SQL_PASSWORD": "YourPassword123!",
+        "READONLY": "true",
+        "PYTHON_PATH": "/opt/anaconda3/bin/python3"
+      }
+    }
+  }
+}
+```
+
+### Example 3: Force Specific Authentication Method
+
+To force SQL authentication (skip Azure CLI attempt):
+
+```json
+{
+  "mcpServers": {
+    "mssql": {
+      "command": "node",
+      "args": ["C:/path/to/your/Node/dist/index.js"],
+      "env": {
+        "SERVER_NAME": "my-server.database.windows.net",
+        "DATABASE_NAME": "mydb",
+        "AUTH_METHOD": "sql-auth",
+        "SQL_USERNAME": "user",
+        "SQL_PASSWORD": "password",
+        "PYTHON_PATH": "/opt/anaconda3/bin/python3"
+      }
+    }
+  }
+}
+```
+
+Additional sample configuration files can be found in the `src/samples/` folder.
 
 ## Usage Examples
 
