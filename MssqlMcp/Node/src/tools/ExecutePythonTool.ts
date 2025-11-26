@@ -12,10 +12,12 @@ interface PythonResult {
   result?: any;
   error?: string;
   line_number?: number;
+  hint?: string;
   stdout?: string;
   stderr?: string;
   queries_executed?: string[];
   available_columns?: Record<string, string[]>;
+  available_packages?: string[];
 }
 
 interface SqlValidation {
@@ -190,6 +192,14 @@ Example:
   private getPythonErrorHint(errorMsg: string): string {
     const hints: string[] = [];
 
+    if (errorMsg.includes('ModuleNotFoundError')) {
+      hints.push('Package not available in sandbox - available packages: pandas, numpy, scipy, sklearn');
+      hints.push('These packages are pre-imported as: pd, np, scipy, sklearn (no import needed)');
+    }
+    if (errorMsg.includes('ImportError')) {
+      hints.push('Import not allowed - available packages: pandas, numpy, scipy, sklearn');
+      hints.push('Note: Packages are already pre-imported, no import statements needed');
+    }
     if (errorMsg.includes('KeyError')) {
       hints.push('Column not found - check column name casing (SQL Server returns exact casing from schema)');
       hints.push('Use df.columns.tolist() to see available columns');
@@ -385,13 +395,14 @@ Example:
 
       if (!dryRunResult.success && !dryRunResult.queries_executed?.length) {
         // If dry run failed and no queries collected, it's a code error
-        const hint = this.getPythonErrorHint(dryRunResult.error || '');
+        const tsHint = this.getPythonErrorHint(dryRunResult.error || '');
+        const fallbackHint = 'Dry run failed - check for syntax errors or ensure no dynamic SQL (f-strings with query results)';
         return {
           success: false,
           error: 'PYTHON_ERROR',
           message: dryRunResult.error,
           line_number: dryRunResult.line_number,
-          hint: hint || 'Dry run failed - check for syntax errors or ensure no dynamic SQL (f-strings with query results)',
+          hint: dryRunResult.hint || tsHint || fallbackHint,  // Prioritize Python hint, then TS hint, then fallback
           stdout: dryRunResult.stdout,
           stderr: dryRunResult.stderr
         };
