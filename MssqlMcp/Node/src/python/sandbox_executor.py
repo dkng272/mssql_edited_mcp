@@ -26,11 +26,6 @@ import scipy
 import scipy.stats
 from sklearn import preprocessing, cluster, decomposition, metrics
 
-# Matplotlib with non-interactive backend for chart generation
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-
 # Global storage for SQL query tracking
 _sql_queries = []
 _query_results = {}
@@ -58,19 +53,6 @@ def query(sql_query: str) -> pd.DataFrame:
         return pd.DataFrame(_query_results[key])
 
     return pd.DataFrame()
-
-
-def save_plot() -> str:
-    """
-    Save current matplotlib figure as base64-encoded PNG.
-    Returns base64 string that can be included in results.
-    """
-    buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
-    plt.close()
-    return img_base64
 
 
 def make_json_serializable(obj):

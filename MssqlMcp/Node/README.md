@@ -91,11 +91,10 @@ Result: 127 bytes in context ✅ (99.99% reduction)
 - **numpy** (`np`) - Numerical operations
 - **scipy** (`stats`) - Statistical functions
 - **scikit-learn** (`sklearn`) - ML preprocessing, clustering
-- **matplotlib** (`plt`) - Charts via `save_plot()`
 
 ### Requirements
 ```bash
-pip install pandas numpy scipy scikit-learn matplotlib
+pip install pandas numpy scipy scikit-learn
 ```
 
 📖 **Full documentation:** [docs/execute_python.md](docs/execute_python.md)
