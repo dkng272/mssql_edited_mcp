@@ -103,11 +103,9 @@ def execute_code(code: str, query_data: dict, is_dry_run: bool) -> dict:
             'decomposition': decomposition,
             'metrics': metrics,
         },
-        'plt': plt,
 
         # Helper functions
         'query': query,
-        'save_plot': save_plot,
         'DataFrame': pd.DataFrame,
         'Series': pd.Series,
 
