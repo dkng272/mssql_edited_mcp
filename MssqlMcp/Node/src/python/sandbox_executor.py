@@ -84,7 +84,7 @@ def make_json_serializable(obj):
 
 def create_safe_import():
     """Create a restricted __import__ that only allows safe packages."""
-    # Store references to allowed modules
+    # Pre-imported packages (return cached references)
     safe_modules = {
         'pandas': pd,
         'numpy': np,
@@ -92,11 +92,36 @@ def create_safe_import():
         'sklearn': None,  # Will be handled specially
     }
 
+    # Safe Python standard library modules (allow normal import)
+    safe_stdlib_modules = {
+        'time', 'datetime', 'calendar',  # Date/time
+        'math', 'cmath', 'decimal', 'fractions', 'random', 'statistics',  # Math
+        'json', 're', 'string',  # Text processing
+        'itertools', 'functools', 'collections', 'heapq', 'bisect',  # Utilities
+        'warnings', 'copy', 'weakref', 'operator',  # Internal utilities
+        'typing', 'dataclasses', 'enum',  # Type hints
+        'abc', 'contextlib', 'reprlib',  # Abstract/context
+    }
+
+    # Dangerous modules (blocked)
+    dangerous_modules = {
+        'os', 'subprocess', 'sys', 'shutil',  # System access
+        'socket', 'urllib', 'http', 'requests', 'ftplib', 'smtplib',  # Network
+        'pickle', 'marshal', 'shelve',  # Unsafe serialization
+        'threading', 'multiprocessing', 'asyncio',  # Concurrency
+        'ctypes', 'cffi',  # C library access
+        'importlib', '__builtin__', 'builtins',  # Import manipulation
+    }
+
+    # Store original __import__ for stdlib modules
+    original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+
     def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
         """Restricted import that only allows whitelisted packages."""
         # Split module name (e.g., 'scipy.stats' -> 'scipy')
         base_module = name.split('.')[0]
 
+        # Check if it's a pre-imported package
         if base_module in safe_modules:
             module = safe_modules[base_module]
             if module is None:
@@ -108,14 +133,26 @@ def create_safe_import():
                     metrics = metrics
                 return SklearnModule()
             return module
-        else:
-            # Provide helpful error for non-whitelisted imports
-            available = ', '.join(safe_modules.keys())
-            raise ModuleNotFoundError(
-                f"Module '{name}' is not available in this sandbox.\n"
-                f"Available packages: {available}\n"
-                f"Tip: These packages are also pre-imported as: pd (pandas), np (numpy), scipy, sklearn"
+
+        # Check if it's a safe stdlib module
+        if base_module in safe_stdlib_modules:
+            return original_import(name, globals, locals, fromlist, level)
+
+        # Check if it's a dangerous module
+        if base_module in dangerous_modules:
+            raise ImportError(
+                f"Module '{name}' is not allowed for security reasons.\n"
+                f"Available packages: pandas, numpy, scipy, sklearn\n"
+                f"Tip: These packages are pre-imported as: pd (pandas), np (numpy), scipy, sklearn"
             )
+
+        # Unknown/unavailable module
+        available = ', '.join(safe_modules.keys())
+        raise ModuleNotFoundError(
+            f"Module '{name}' is not available in this sandbox.\n"
+            f"Available packages: {available}\n"
+            f"Tip: These packages are also pre-imported as: pd (pandas), np (numpy), scipy, sklearn"
+        )
 
     return safe_import
 
