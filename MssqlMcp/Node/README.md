@@ -27,23 +27,99 @@ This server leverages the Model Context Protocol (MCP), a versatile framework th
 - Manage database schema (tables, indexes)
 - Secure connection handling
 - Real-time data interaction
+- **Execute Python code** for server-side data processing (see below)
+
+## Execute Python Tool 🐍
+
+A powerful feature that lets AI agents write Python code to process SQL data server-side, dramatically reducing context window usage.
+
+### The Problem
+Traditional SQL tools return full query results to context:
+```
+Query: SELECT * FROM Sales WHERE Year = 2024
+Result: 45,000 rows × 12 columns = ~2MB in context 😱
+```
+
+### The Solution
+With `execute_python`, the agent writes Python code that runs on the server:
+
+```python
+# Agent writes this complete code block
+df = query("""
+    SELECT p.TICKER, p.PX_LAST, s.L2 as Sector
+    FROM Market_Data p
+    JOIN Sector_Map s ON p.TICKER = s.Ticker
+    WHERE s.L2 = 'Brokerage'
+""")
+
+# Process with pandas
+avg_by_sector = df.groupby('Sector')['PX_LAST'].mean()
+
+# Only 'result' is returned to context
+result = {
+    "average_price": avg_by_sector.to_dict(),
+    "total_stocks": len(df)
+}
+```
+
+```
+Result: 127 bytes in context ✅ (99.99% reduction)
+```
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ 1. Agent writes full Python code                        │
+│    (SQL queries + pandas processing + result)           │
+└─────────────────────────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│ 2. Tool executes in sandboxed Python environment        │
+│    - query() fetches SQL data → DataFrame               │
+│    - pandas/numpy/sklearn process data                  │
+└─────────────────────────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│ 3. Only 'result' variable returned to agent             │
+│    (must be JSON-serializable)                          │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Available Packages
+- **pandas** (`pd`) - DataFrames, groupby, merge
+- **numpy** (`np`) - Numerical operations
+- **scipy** (`stats`) - Statistical functions
+- **scikit-learn** (`sklearn`) - ML preprocessing, clustering
+- **matplotlib** (`plt`) - Charts via `save_plot()`
+
+### Requirements
+```bash
+pip install pandas numpy scipy scikit-learn matplotlib
+```
+
+📖 **Full documentation:** [docs/execute_python.md](docs/execute_python.md)
 
 ## Quick Start 🚀
 
 ### Prerequisites
-- Node.js 14 or higher
+- Node.js 18 or higher
+- Python 3.9+ (for execute_python tool)
 - Claude Desktop or VS Code with Agent extension
 
 ### Set up project
 
-1. **Install Dependencies**  
-   Run the following command in the root folder to install all necessary dependencies:  
+1. **Install Node Dependencies**
    ```bash
    npm install
    ```
 
-2. **Build the Project**  
-   Compile the project by running:  
+2. **Install Python Dependencies** (for execute_python tool)
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Build the Project**
    ```bash
    npm run build
    ```

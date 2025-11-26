@@ -6,7 +6,7 @@
     "mssql-mcp-server": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc && shx chmod +x dist/*.js",
+    "build": "tsc && shx chmod +x dist/*.js && shx mkdir -p dist/python && shx cp src/python/*.py dist/python/",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "start": "node dist/index.js"

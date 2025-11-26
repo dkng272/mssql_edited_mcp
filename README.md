@@ -1,22 +1,67 @@
-# SQL-AI-samples (Modified Fork)
+# MSSQL MCP Server
 
-## About this fork
+A Model Context Protocol (MCP) server that enables AI assistants like Claude to interact with Microsoft SQL Server databases through natural language.
 
-This is a modified fork of the [Azure-Samples/SQL-AI-samples](https://github.com/Azure-Samples/SQL-AI-samples) repository with custom enhancements.
+## Features
 
-### Enhancements Added
+- **Natural Language Queries** - Ask questions in plain English, get SQL results
+- **Full CRUD Operations** - Read, create, update, and delete data
+- **Schema Management** - Create tables, indexes, and manage structure
+- **Execute Python** - Server-side data processing with pandas/numpy (99% context reduction)
+- **Export to CSV** - Export query results directly to files
+- **Secure Connection** - Azure AD authentication support
 
-**MSSQL MCP Server - Node.js Edition**
-- **ExportDataTool**: New functionality to export SQL query results directly to CSV files
-  - Executes SELECT queries and writes results to specified file paths
-  - More efficient than read_data for large datasets
-  - Includes optional header configuration
-  - Available in both readonly and full access modes (safe read-only operation)
-  - See: `MssqlMcp/Node/src/tools/ExportDataTool.ts`
+## Quick Start
 
-- **Schema-based Table Access Control**: Enhanced ListTableTool with schema filtering
-  - Filter and list tables from specific database schemas
-  - Allows restricting access to specific schemas for better security and organization
-  - Supports multiple schema filtering in a single query
-  - See: `MssqlMcp/Node/src/tools/ListTableTool.ts`
+```bash
+cd MssqlMcp/Node
+npm install
+pip install -r requirements.txt
+npm run build
+```
 
+See [MssqlMcp/Node/README.md](MssqlMcp/Node/README.md) for full setup instructions.
+
+## Execute Python Tool
+
+Process large datasets server-side, return only summaries:
+
+```python
+df = query("""
+    SELECT p.TICKER, p.PX_LAST, s.L2 as Sector
+    FROM Market_Data p
+    JOIN Sector_Map s ON p.TICKER = s.Ticker
+    WHERE s.L2 = 'Brokerage'
+""")
+
+result = {
+    "avg_price": df['PX_LAST'].mean(),
+    "count": len(df)
+}
+```
+
+45,000 rows → 127 bytes in context.
+
+See [MssqlMcp/Node/docs/execute_python.md](MssqlMcp/Node/docs/execute_python.md) for full documentation.
+
+## Project Structure
+
+```
+MssqlMcp/Node/
+├── src/
+│   ├── index.ts           # MCP server entry point
+│   ├── tools/             # Tool implementations
+│   │   ├── ExecutePythonTool.ts
+│   │   ├── ReadDataTool.ts
+│   │   ├── ExportDataTool.ts
+│   │   └── ...
+│   └── python/
+│       └── sandbox_executor.py
+├── docs/
+│   └── execute_python.md
+└── README.md
+```
+
+## License
+
+MIT License - See [LICENSE](LICENSE)

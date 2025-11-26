@@ -21,6 +21,7 @@ import { DropTableTool } from "./tools/DropTableTool.js";
 import { AzureCliCredential } from "@azure/identity";
 import { DescribeTableTool } from "./tools/DescribeTableTool.js";
 import { ExportDataTool } from "./tools/ExportDataTool.js";
+import { ExecutePythonTool } from "./tools/ExecutePythonTool.js";
 
 // MSSQL Database connection configuration
 
@@ -67,6 +68,7 @@ const listTableTool = new ListTableTool();
 const dropTableTool = new DropTableTool();
 const describeTableTool = new DescribeTableTool();
 const exportDataTool = new ExportDataTool();
+const executePythonTool = new ExecutePythonTool();
 
 const server = new Server(
   {
@@ -87,8 +89,8 @@ const isReadOnly = process.env.READONLY === "true";
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: isReadOnly
-    ? [listTableTool, readDataTool, describeTableTool, exportDataTool] // export is safe in readonly mode
-    : [insertDataTool, readDataTool, describeTableTool, updateDataTool, createTableTool, createIndexTool, dropTableTool, listTableTool, exportDataTool], // add all new tools here
+    ? [listTableTool, readDataTool, describeTableTool, exportDataTool, executePythonTool] // execute_python is safe (SELECT only)
+    : [insertDataTool, readDataTool, describeTableTool, updateDataTool, createTableTool, createIndexTool, dropTableTool, listTableTool, exportDataTool, executePythonTool],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -128,6 +130,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case exportDataTool.name:
         result = await exportDataTool.run(args);
+        break;
+      case executePythonTool.name:
+        result = await executePythonTool.run(args);
         break;
       default:
         return {
@@ -198,4 +203,4 @@ function wrapToolRun(tool: { run: (...args: any[]) => Promise<any> }) {
   };
 }
 
-[insertDataTool, readDataTool, updateDataTool, createTableTool, createIndexTool, dropTableTool, listTableTool, describeTableTool, exportDataTool].forEach(wrapToolRun);
+[insertDataTool, readDataTool, updateDataTool, createTableTool, createIndexTool, dropTableTool, listTableTool, describeTableTool, exportDataTool, executePythonTool].forEach(wrapToolRun);
