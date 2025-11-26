@@ -147,7 +147,8 @@ pip install pandas numpy scipy scikit-learn matplotlib
           "env": {
             "SERVER_NAME": "your-server-name.database.windows.net",
             "DATABASE_NAME": "your-database-name",
-            "READONLY": "false"
+            "READONLY": "false",
+            "PYTHON_PATH": "C:/Python311/python.exe"
           }
         }
       }
@@ -170,7 +171,8 @@ pip install pandas numpy scipy scikit-learn matplotlib
                 "env": {
                 "SERVER_NAME": "your-server-name.database.windows.net",
                 "DATABASE_NAME": "your-database-name",
-                "READONLY": "false"
+                "READONLY": "false",
+                "PYTHON_PATH": "C:/Python311/python.exe"
                 }
             }
         }
@@ -204,12 +206,15 @@ pip install pandas numpy scipy scikit-learn matplotlib
          "env": {
            "SERVER_NAME": "your-server-name.database.windows.net",
            "DATABASE_NAME": "your-database-name",
-           "READONLY": "false"
+           "READONLY": "false",
+           "PYTHON_PATH": "/path/to/python3"
          }
        }
      }
    }
    ```
+
+   > **Note for execute_python users**: The `PYTHON_PATH` environment variable is required for the execute_python tool. Set it to your Python interpreter that has pandas, numpy, scipy, and scikit-learn installed (e.g., `/opt/anaconda3/bin/python3` on macOS, `C:/Python311/python.exe` on Windows).
 
 3. **Restart Claude Desktop**
    - Close and reopen Claude Desktop for the changes to take effect
@@ -222,6 +227,7 @@ pip install pandas numpy scipy scikit-learn matplotlib
 - **Path**: Update the path in `args` to point to your actual project location.
 - **CONNECTION_TIMEOUT**: (Optional) Connection timeout in seconds. Defaults to `30` if not set.
 - **TRUST_SERVER_CERTIFICATE**: (Optional) Set to `"true"` to trust self-signed server certificates (useful for development or when connecting to servers with self-signed certs). Defaults to `"false"`.
+- **PYTHON_PATH**: (Required for execute_python) Full path to Python interpreter with required packages installed. Claude Desktop and VS Code may use different Python environments than your terminal, so specify the exact path (e.g., `/opt/anaconda3/bin/python3`, `C:/Python311/python.exe`).
 
 ## Sample Configurations
 
