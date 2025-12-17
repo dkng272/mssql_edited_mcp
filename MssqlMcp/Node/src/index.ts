@@ -233,8 +233,8 @@ const server = new Server(
   },
 );
 
-// Read READONLY env variable
-const isReadOnly = process.env.READONLY === "true";
+// Force read-only mode - no write operations exposed to agents
+const isReadOnly = true;
 
 // Request handlers
 
