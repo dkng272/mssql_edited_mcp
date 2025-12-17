@@ -556,8 +556,11 @@ Example:
       const queries = dryRunResult.queries_executed || [];
       console.log(`ExecutePython: Found ${queries.length} SQL queries`);
 
-      if (queries.length === 0) {
-        // No SQL queries - just return the dry run result if it succeeded
+      // Check if there are CSV saves that need final run
+      const hasCsvSaves = dryRunResult.csv_saves && dryRunResult.csv_saves.length > 0;
+
+      if (queries.length === 0 && !hasCsvSaves) {
+        // No SQL queries and no CSV saves - just return the dry run result
         if (dryRunResult.success) {
           return this.formatSuccessResponse(dryRunResult, maxOutputSize, []);
         }
@@ -566,6 +569,46 @@ Example:
           error: 'PYTHON_ERROR',
           message: dryRunResult.error
         };
+      }
+
+      if (queries.length === 0 && hasCsvSaves) {
+        // No SQL queries but has CSV saves - need final run to get actual data
+        console.log('ExecutePython: No SQL queries, but has CSV saves - running final execution...');
+        const finalResult = await this.executePython(code, {}, safeTimeout, false);
+
+        if (!finalResult.success) {
+          const hint = this.getPythonErrorHint(finalResult.error || '');
+          const response: any = {
+            success: false,
+            error: 'PYTHON_ERROR',
+            message: finalResult.error,
+            line_number: finalResult.line_number,
+            stdout: finalResult.stdout,
+            stderr: finalResult.stderr
+          };
+          if (hint) response.hint = hint;
+          return response;
+        }
+
+        // Phase 4: Write CSV files
+        let csvResults: CsvSaveResult[] = [];
+        if (finalResult.csv_saves && finalResult.csv_saves.length > 0) {
+          console.log(`ExecutePython: Phase 4 - Writing ${finalResult.csv_saves.length} CSV file(s)...`);
+          csvResults = this.writeCsvFiles(finalResult.csv_saves);
+
+          const failures = csvResults.filter(r => !r.success);
+          if (failures.length > 0) {
+            return {
+              success: false,
+              error: 'CSV_WRITE_FAILED',
+              message: `Failed to write ${failures.length} CSV file(s)`,
+              csv_errors: failures,
+              partial_results: csvResults.filter(r => r.success)
+            };
+          }
+        }
+
+        return this.formatSuccessResponse(finalResult, maxOutputSize, [], [], csvResults);
       }
 
       // Phase 2: Validate and execute SQL queries
