@@ -31,6 +31,9 @@ _sql_queries = []
 _query_results = {}
 _is_dry_run = True
 
+# Global storage for CSV save tracking
+_csv_saves = []
+
 
 def query(sql_query: str) -> pd.DataFrame:
     """
@@ -53,6 +56,104 @@ def query(sql_query: str) -> pd.DataFrame:
         return pd.DataFrame(_query_results[key])
 
     return pd.DataFrame()
+
+
+def save_csv(data, path: str, include_header: bool = True) -> dict:
+    """
+    Save DataFrame or list to CSV file.
+
+    In dry run mode: Records the save request and returns placeholder metadata.
+    In final run mode: Converts data to CSV and records for Node.js to write.
+
+    Args:
+        data: DataFrame or list of dicts
+        path: Output file path (~ expanded by Node.js)
+        include_header: Whether to include column headers (default: True)
+
+    Returns:
+        dict with save_id, path, status, and row count
+    """
+    global _csv_saves, _is_dry_run
+
+    save_id = len(_csv_saves)
+
+    if _is_dry_run:
+        _csv_saves.append({
+            'save_id': save_id,
+            'path': path,
+            'csv_content': None
+        })
+        return {
+            'save_id': save_id,
+            'path': path,
+            'status': 'pending',
+            'rows': 0
+        }
+
+    # Final run: convert data to CSV string
+    csv_content = _convert_to_csv(data, include_header)
+    row_count = _count_rows(data)
+
+    _csv_saves.append({
+        'save_id': save_id,
+        'path': path,
+        'csv_content': csv_content
+    })
+
+    return {
+        'save_id': save_id,
+        'path': path,
+        'status': 'queued',
+        'rows': row_count,
+        'size_bytes': len(csv_content.encode('utf-8')) if csv_content else 0
+    }
+
+
+def _convert_to_csv(data, include_header: bool = True) -> str:
+    """Convert DataFrame or list to CSV string."""
+    from io import StringIO
+
+    if isinstance(data, pd.DataFrame):
+        output = StringIO()
+        data.to_csv(output, index=False, header=include_header)
+        return output.getvalue()
+
+    if isinstance(data, list):
+        if len(data) == 0:
+            return ''
+
+        # List of dicts
+        if isinstance(data[0], dict):
+            df = pd.DataFrame(data)
+            output = StringIO()
+            df.to_csv(output, index=False, header=include_header)
+            return output.getvalue()
+
+        # 2D list (treat first row as header if include_header)
+        if isinstance(data[0], (list, tuple)):
+            if include_header and len(data) > 1:
+                df = pd.DataFrame(data[1:], columns=data[0])
+            else:
+                df = pd.DataFrame(data)
+            output = StringIO()
+            df.to_csv(output, index=False, header=include_header)
+            return output.getvalue()
+
+    raise ValueError(f"Cannot convert {type(data).__name__} to CSV. Use DataFrame or list of dicts.")
+
+
+def _count_rows(data) -> int:
+    """Count rows in data."""
+    if isinstance(data, pd.DataFrame):
+        return len(data)
+    if isinstance(data, list):
+        if len(data) == 0:
+            return 0
+        if isinstance(data[0], dict):
+            return len(data)
+        if isinstance(data[0], (list, tuple)):
+            return len(data) - 1  # Exclude header row
+    return 0
 
 
 def make_json_serializable(obj):
@@ -159,10 +260,11 @@ def create_safe_import():
 
 def execute_code(code: str, query_data: dict, is_dry_run: bool) -> dict:
     """Execute Python code in restricted namespace."""
-    global _query_results, _sql_queries, _is_dry_run
+    global _query_results, _sql_queries, _is_dry_run, _csv_saves
 
     _query_results = query_data
     _sql_queries = []
+    _csv_saves = []
     _is_dry_run = is_dry_run
 
     # Restricted namespace with safe builtins and data science packages
@@ -181,6 +283,7 @@ def execute_code(code: str, query_data: dict, is_dry_run: bool) -> dict:
 
         # Helper functions
         'query': query,
+        'save_csv': save_csv,
         'DataFrame': pd.DataFrame,
         'Series': pd.Series,
 
@@ -268,7 +371,8 @@ def execute_code(code: str, query_data: dict, is_dry_run: bool) -> dict:
             'result': make_json_serializable(result),
             'stdout': stdout_capture.getvalue()[:10000],  # Limit stdout
             'stderr': stderr_capture.getvalue()[:5000],   # Limit stderr
-            'queries_executed': _sql_queries.copy()
+            'queries_executed': _sql_queries.copy(),
+            'csv_saves': _csv_saves.copy()
         }
 
     except SyntaxError as e:
@@ -278,7 +382,8 @@ def execute_code(code: str, query_data: dict, is_dry_run: bool) -> dict:
             'line_number': e.lineno,
             'stdout': stdout_capture.getvalue()[:5000],
             'stderr': stderr_capture.getvalue()[:5000],
-            'queries_executed': _sql_queries.copy()
+            'queries_executed': _sql_queries.copy(),
+            'csv_saves': _csv_saves.copy()
         }
     except KeyError as e:
         # Extract available columns from DataFrames in namespace for better error message
@@ -293,7 +398,8 @@ def execute_code(code: str, query_data: dict, is_dry_run: bool) -> dict:
             'available_columns': available_columns if available_columns else None,
             'stdout': stdout_capture.getvalue()[:5000],
             'stderr': stderr_capture.getvalue()[:5000],
-            'queries_executed': _sql_queries.copy()
+            'queries_executed': _sql_queries.copy(),
+            'csv_saves': _csv_saves.copy()
         }
     except ModuleNotFoundError as e:
         # Handle import errors for unavailable packages
@@ -311,7 +417,8 @@ def execute_code(code: str, query_data: dict, is_dry_run: bool) -> dict:
             'available_packages': ['pandas', 'numpy', 'scipy', 'sklearn'],
             'stdout': stdout_capture.getvalue()[:5000],
             'stderr': stderr_capture.getvalue()[:5000],
-            'queries_executed': _sql_queries.copy()
+            'queries_executed': _sql_queries.copy(),
+            'csv_saves': _csv_saves.copy()
         }
     except ImportError as e:
         # Handle other import-related errors
@@ -328,7 +435,8 @@ def execute_code(code: str, query_data: dict, is_dry_run: bool) -> dict:
             'line_number': line_number,
             'stdout': stdout_capture.getvalue()[:5000],
             'stderr': stderr_capture.getvalue()[:5000],
-            'queries_executed': _sql_queries.copy()
+            'queries_executed': _sql_queries.copy(),
+            'csv_saves': _csv_saves.copy()
         }
     except Exception as e:
         # Try to extract line number from traceback
@@ -342,7 +450,8 @@ def execute_code(code: str, query_data: dict, is_dry_run: bool) -> dict:
             'line_number': line_number,
             'stdout': stdout_capture.getvalue()[:5000],
             'stderr': stderr_capture.getvalue()[:5000],
-            'queries_executed': _sql_queries.copy()
+            'queries_executed': _sql_queries.copy(),
+            'csv_saves': _csv_saves.copy()
         }
 
 

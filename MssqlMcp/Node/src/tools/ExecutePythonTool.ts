@@ -1,11 +1,27 @@
 import { spawn } from "child_process";
 import sql from "mssql";
 import * as path from "path";
+import * as fs from "fs";
 import { fileURLToPath } from "url";
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+interface CsvSaveRequest {
+  save_id: number;
+  path: string;
+  csv_content: string | null;
+}
+
+interface CsvSaveResult {
+  save_id: number;
+  path: string;
+  success: boolean;
+  rows?: number;
+  size_bytes?: number;
+  error?: string;
+}
 
 interface PythonResult {
   success: boolean;
@@ -16,6 +32,7 @@ interface PythonResult {
   stdout?: string;
   stderr?: string;
   queries_executed?: string[];
+  csv_saves?: CsvSaveRequest[];
   available_columns?: Record<string, string[]>;
   available_packages?: string[];
 }
@@ -32,13 +49,19 @@ export class ExecutePythonTool implements Tool {
 
 Available:
 - query(sql): Execute SQL SELECT query, returns pandas DataFrame
-- pd (pandas), np (numpy), scipy, sklearn, plt (matplotlib) pre-imported
-- save_plot(): Save current matplotlib figure as base64 PNG
+- save_csv(data, path): Export DataFrame/list to CSV file
+- pd (pandas), np (numpy), scipy, sklearn pre-imported
 
 Usage:
 - Assign final result to 'result' variable
 - Result must be JSON-serializable (dict, list, numbers, strings)
 - Use for aggregations, filtering, statistics to reduce data returned
+- Use save_csv() to export large results to files instead of returning them
+
+save_csv Examples:
+  df = query("SELECT * FROM LargeTable")
+  save_csv(df, "~/exports/data.csv")  # Save DataFrame
+  save_csv(df.to_dict('records'), "~/exports/data.csv")  # Save list of dicts
 
 IMPORTANT - Use JOINs for related data:
   # Get sector stocks with price data in ONE query:
@@ -156,6 +179,10 @@ Example:
     /\+\s*CHAR\s*\(/i,
     /\+\s*NCHAR\s*\(/i,
   ];
+
+  // CSV export limits
+  private static readonly MAX_CSV_FILE_SIZE = 50 * 1024 * 1024; // 50MB per file
+  private static readonly MAX_CSV_FILES = 10; // Maximum files per execution
 
   /**
    * Generate hint for SQL errors to help AI agent self-correct
@@ -294,6 +321,124 @@ Example:
     }
 
     return { isValid: true };
+  }
+
+  /**
+   * Validates file path for CSV export (same rules as ExportDataTool)
+   */
+  private validateCsvPath(filePath: string): { isValid: boolean; error?: string; expandedPath?: string } {
+    if (!filePath || typeof filePath !== 'string') {
+      return { isValid: false, error: 'File path must be a non-empty string' };
+    }
+
+    // Check for path traversal attempts
+    if (filePath.includes('..')) {
+      return { isValid: false, error: 'Path traversal not allowed' };
+    }
+
+    // Ensure it's a CSV file
+    if (!filePath.toLowerCase().endsWith('.csv')) {
+      return { isValid: false, error: 'Output file must have .csv extension' };
+    }
+
+    // Check path length
+    if (filePath.length > 500) {
+      return { isValid: false, error: 'File path too long (max 500 characters)' };
+    }
+
+    // Expand tilde to home directory
+    let expandedPath = filePath;
+    if (filePath.startsWith('~/')) {
+      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+      expandedPath = filePath.replace(/^~/, homeDir);
+    }
+
+    return { isValid: true, expandedPath };
+  }
+
+  /**
+   * Writes CSV files collected during Python execution
+   */
+  private writeCsvFiles(csvSaves: CsvSaveRequest[]): CsvSaveResult[] {
+    const results: CsvSaveResult[] = [];
+
+    // Check file count limit
+    if (csvSaves.length > ExecutePythonTool.MAX_CSV_FILES) {
+      return [{
+        save_id: -1,
+        path: '',
+        success: false,
+        error: `Too many CSV files (${csvSaves.length}). Maximum allowed: ${ExecutePythonTool.MAX_CSV_FILES}`
+      }];
+    }
+
+    // Process each save request
+    for (const save of csvSaves) {
+      if (!save.csv_content) {
+        continue; // Skip dry run placeholders
+      }
+
+      // Check file size
+      const size = Buffer.byteLength(save.csv_content, 'utf8');
+      if (size > ExecutePythonTool.MAX_CSV_FILE_SIZE) {
+        results.push({
+          save_id: save.save_id,
+          path: save.path,
+          success: false,
+          error: `File too large (${Math.round(size / 1024 / 1024)}MB). Maximum: 50MB`
+        });
+        continue;
+      }
+
+      // Validate path
+      const pathValidation = this.validateCsvPath(save.path);
+      if (!pathValidation.isValid) {
+        results.push({
+          save_id: save.save_id,
+          path: save.path,
+          success: false,
+          error: pathValidation.error
+        });
+        continue;
+      }
+
+      try {
+        const expandedPath = pathValidation.expandedPath!;
+
+        // Ensure directory exists
+        const dir = path.dirname(expandedPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+
+        // Write file
+        fs.writeFileSync(expandedPath, save.csv_content, 'utf8');
+        const stats = fs.statSync(expandedPath);
+
+        // Count rows (newlines in CSV)
+        const rowCount = (save.csv_content.match(/\n/g) || []).length;
+
+        results.push({
+          save_id: save.save_id,
+          path: expandedPath,
+          success: true,
+          rows: rowCount,
+          size_bytes: stats.size
+        });
+
+        console.log(`ExecutePython: Saved CSV ${save.save_id} to ${expandedPath} (${rowCount} rows, ${stats.size} bytes)`);
+
+      } catch (err) {
+        results.push({
+          save_id: save.save_id,
+          path: save.path,
+          success: false,
+          error: err instanceof Error ? err.message : 'Unknown write error'
+        });
+      }
+    }
+
+    return results;
   }
 
   /**
@@ -489,7 +634,26 @@ Example:
         .filter(([_, rows]) => (rows as any[]).length === 0)
         .map(([idx, _]) => parseInt(idx) + 1);
 
-      return this.formatSuccessResponse(finalResult, maxOutputSize, queries, emptyQueries);
+      // Phase 4: Write CSV files if any
+      let csvResults: CsvSaveResult[] = [];
+      if (finalResult.csv_saves && finalResult.csv_saves.length > 0) {
+        console.log(`ExecutePython: Phase 4 - Writing ${finalResult.csv_saves.length} CSV file(s)...`);
+        csvResults = this.writeCsvFiles(finalResult.csv_saves);
+
+        // Check for any failures
+        const failures = csvResults.filter(r => !r.success);
+        if (failures.length > 0) {
+          return {
+            success: false,
+            error: 'CSV_WRITE_FAILED',
+            message: `Failed to write ${failures.length} CSV file(s)`,
+            csv_errors: failures,
+            partial_results: csvResults.filter(r => r.success)
+          };
+        }
+      }
+
+      return this.formatSuccessResponse(finalResult, maxOutputSize, queries, emptyQueries, csvResults);
 
     } catch (error) {
       console.error('ExecutePython error:', error);
@@ -508,7 +672,8 @@ Example:
     result: PythonResult,
     maxOutputSize: number,
     queries: string[],
-    emptyQueries: number[] = []
+    emptyQueries: number[] = [],
+    csvSaves: CsvSaveResult[] = []
   ): any {
     const resultStr = JSON.stringify(result.result);
 
@@ -533,6 +698,15 @@ Example:
     // Add warning if any queries returned 0 rows
     if (emptyQueries.length > 0) {
       response.warning = `Query ${emptyQueries.join(', ')} returned 0 rows - check filter conditions`;
+    }
+
+    // Add CSV save results
+    if (csvSaves.length > 0) {
+      response.csv_files_saved = csvSaves.map(r => ({
+        path: r.path,
+        rows: r.rows,
+        size_bytes: r.size_bytes
+      }));
     }
 
     return response;
